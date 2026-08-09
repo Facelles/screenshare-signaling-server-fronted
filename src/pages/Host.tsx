@@ -318,10 +318,10 @@ export default function Host(_props: Props) {
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           {!sharing ? (
             <button onClick={handleStartShare} disabled={status === 'init' || status === 'error'}
-              className="py-3 px-6 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500
+              className="w-full sm:w-auto py-3 px-6 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500
                 text-white font-semibold text-sm cursor-pointer shadow-lg
                 hover:shadow-violet-500/50 hover:-translate-y-0.5
                 active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -329,7 +329,7 @@ export default function Host(_props: Props) {
             </button>
           ) : (
             <button onClick={stopSharing}
-              className="py-3 px-6 rounded-xl bg-red-600 border border-red-500/40
+              className="w-full sm:w-auto py-3 px-6 rounded-xl bg-red-600 border border-red-500/40
                 text-white font-semibold text-sm cursor-pointer shadow-lg
                 hover:bg-red-500 hover:shadow-red-500/50 hover:-translate-y-0.5
                 transition-all duration-200 active:scale-95">
@@ -340,7 +340,7 @@ export default function Host(_props: Props) {
           {/* Mic button */}
           {status === 'connected' && (
             <button onClick={handleToggleMic}
-              className={`flex items-center gap-2 py-3 px-5 rounded-xl border text-sm font-medium cursor-pointer shadow-lg
+              className={`w-full sm:w-auto flex items-center justify-center gap-2 py-3 px-5 rounded-xl border text-sm font-medium cursor-pointer shadow-lg
                 transition-all duration-200 active:scale-95
                 ${micOn
                   ? 'bg-emerald-500 border-emerald-400 text-white shadow-emerald-500/30 hover:bg-emerald-400'

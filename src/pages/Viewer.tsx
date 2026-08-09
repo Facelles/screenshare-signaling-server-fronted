@@ -258,7 +258,7 @@ export default function Viewer({ token }: Props) {
 
   return (
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden group"
-      onMouseMove={revealHud} onClick={revealHud}>
+      onMouseMove={revealHud} onClick={revealHud} onTouchStart={revealHud}>
 
       <audio ref={hostAudioRef} autoPlay playsInline />
       <video ref={videoRef} id="viewer-video" autoPlay playsInline className="w-full h-full object-contain" />
@@ -272,87 +272,93 @@ export default function Viewer({ token }: Props) {
         </div>
       )}
 
-      {/* Speaking Indicators Overlay */}
-      {status === 'playing' && (
-        <div className={`absolute bottom-6 right-6 flex flex-col gap-3 transition-opacity duration-300 ${showHud ? 'opacity-100' : 'opacity-70'}`}>
-          {remoteMicStream && (
-            <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/10 shadow-lg">
-              <div className={`w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center avatar-base border-2 ${isHostSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
-                <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-              </div>
-              <span className="text-xs font-medium text-white/90">Хост</span>
-            </div>
-          )}
-          {micOn && (
-            <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/10 shadow-lg">
-              <div className={`w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center avatar-base border-2 ${isViewerSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
-                <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
-              </div>
-              <span className="text-xs font-medium text-white/90">Ви</span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* HUD (Top Bar) */}
-      <div className={`absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4
-        bg-gradient-to-b from-black/80 via-black/40 to-transparent
+      {/* Top Bar: Stats & Avatars */}
+      <div className={`absolute top-0 left-0 right-0 flex items-start justify-between px-4 sm:px-6 py-4
+        bg-gradient-to-b from-black/70 to-transparent pointer-events-none
         transition-opacity duration-500 z-20 ${showHud || status !== 'playing' ? 'opacity-100' : 'opacity-0'}`}>
-
-        <div className="flex items-center gap-3">
+        
+        {/* Top Left: Stats */}
+        <div className="flex flex-col gap-2 pointer-events-auto">
           {status === 'playing' && (
-            <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full w-fit">
               <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-dot" />
               <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold">Live</span>
             </div>
           )}
+          {status === 'playing' && (
+            <div className="flex gap-3 text-[11px] text-white/60 font-mono bg-black/40 px-3 py-1.5 rounded-xl border border-white/5 backdrop-blur-sm">
+              <span>{fps ? `${fps} fps` : '—'}</span>
+              <span>{kbps ? `${kbps} kbps` : '—'}</span>
+              {latencyMs > 0 && <span className="hidden sm:inline">{latencyMs}ms ping</span>}
+            </div>
+          )}
         </div>
 
+        {/* Top Right: Avatars */}
         {status === 'playing' && (
-          <div className="flex gap-4 text-xs text-white/60 font-mono bg-black/40 px-4 py-1.5 rounded-full border border-white/5 backdrop-blur-sm hidden sm:flex">
-            <span>{fps ? `${fps} fps` : '—'}</span>
-            <span>{kbps ? `${kbps} kbps` : '—'}</span>
-            {latencyMs > 0 && <span>{latencyMs}ms ping</span>}
-          </div>
-        )}
-
-        {status === 'playing' && (
-          <div className="flex items-center gap-2">
-            <button onClick={handleToggleMic} title={micOn ? 'Вимкнути мікрофон' : 'Увімкнути мікрофон'}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all shadow-md
-                ${micOn
-                  ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-400'
-                  : 'bg-white/10 text-white/80 hover:text-white hover:bg-white/20 backdrop-blur-sm'}`}>
-              {micOn ? (
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
-              ) : (
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="2" x2="22" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33"/><path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8"/></svg>
-              )}
-              <span className="hidden sm:inline">{micOn ? 'Увімк.' : 'Вимк.'}</span>
-            </button>
-
-            {'pictureInPictureEnabled' in document && (
-              <button onClick={togglePip} title="Picture-in-Picture"
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all cursor-pointer backdrop-blur-sm">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="9" height="7" rx="1.5" fill="currentColor" stroke="none"/>
-                </svg>
-              </button>
+          <div className="flex flex-col gap-2 pointer-events-auto">
+            {remoteMicStream && (
+              <div className="flex items-center justify-end gap-2 bg-black/40 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/5 shadow-lg">
+                <span className="text-xs font-medium text-white/80">Хост</span>
+                <div className={`w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center avatar-base border-2 ${isHostSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
+                  <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                </div>
+              </div>
             )}
-
-            <button onClick={toggleFullscreen} title="На весь екран"
-              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all cursor-pointer backdrop-blur-sm">
-              {isFullscreen
-                ? <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
-                : <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7"/></svg>
-              }
-            </button>
+            {micOn && (
+              <div className="flex items-center justify-end gap-2 bg-black/40 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/5 shadow-lg">
+                <span className="text-xs font-medium text-white/80">Ви</span>
+                <div className={`w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center avatar-base border-2 ${isViewerSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
+                  <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
+      {/* Bottom Control Bar (Prominent & Mobile Friendly) */}
+      {status === 'playing' && (
+        <div className={`absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-2 sm:gap-4 px-4 sm:px-6 py-3
+          bg-black/60 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl z-30
+          transition-all duration-500 ${showHud ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
+
+          <button onClick={handleToggleMic}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all shadow-md active:scale-95
+              ${micOn
+                ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-400'
+                : 'bg-white/10 text-white hover:bg-white/20'}`}>
+            {micOn ? (
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+            ) : (
+              <svg className="w-5 h-5 text-white/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="2" x2="22" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33"/><path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8"/></svg>
+            )}
+            <span>{micOn ? 'Мікрофон' : 'Увімкнути'}</span>
+          </button>
+
+          <div className="w-px h-8 bg-white/10 mx-1"></div>
+
+          {'pictureInPictureEnabled' in document && (
+            <button onClick={togglePip} title="Picture-in-Picture"
+              className="p-3 rounded-xl bg-white/5 hover:bg-white/15 text-white/80 hover:text-white transition-all cursor-pointer active:scale-95">
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="9" height="7" rx="1.5" fill="currentColor" stroke="none"/>
+              </svg>
+            </button>
+          )}
+
+          <button onClick={toggleFullscreen} title="На весь екран"
+            className="p-3 rounded-xl bg-white/5 hover:bg-white/15 text-white/80 hover:text-white transition-all cursor-pointer active:scale-95">
+            {isFullscreen
+              ? <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
+              : <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7"/></svg>
+            }
+          </button>
+        </div>
+      )}
+
       {micError && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 z-30
           px-4 py-2.5 bg-red-500/20 backdrop-blur-md border border-red-500/40 rounded-xl text-red-200 text-sm shadow-xl flex items-center gap-2">
           <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
           {micError}
