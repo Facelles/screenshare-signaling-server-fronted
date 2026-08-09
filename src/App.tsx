@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import Home from './pages/Home.js';
-import Host from './pages/Host.js';
-import Viewer from './pages/Viewer.js';
+import Home from './pages/Home';
+import Host from './pages/Host';
+import Viewer from './pages/Viewer';
 
 type Page = 'home' | 'host' | 'viewer';
 
@@ -35,7 +35,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  if (route.page === 'host')   return <Host token={route.token} />;
+  if (route.page === 'host') return <Host token={route.token} />;
   if (route.page === 'viewer') return <Viewer token={route.token} />;
   return <Home />;
 }

@@ -42,6 +42,7 @@ body::before {
   border: 1px solid rgba(255,255,255,.08);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  @apply shadow-[0_8px_32px_rgba(0,0,0,0.4)];
 }
 
 /* Spinner */
@@ -63,7 +64,21 @@ body::before {
 
 /* Pulse dot */
 @keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: .4; }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
 }
-.pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+.pulse-dot { animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+/* Avatar Glow (Discord style) */
+.avatar-base {
+  transition: all 0.15s ease-out;
+}
+.avatar-speaking {
+  @apply border-emerald-400/80 shadow-[0_0_15px_rgba(52,211,153,0.5)];
+  animation: speak-pulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes speak-pulse {
+  from { box-shadow: 0 0 8px rgba(52, 211, 153, 0.3); }
+  to { box-shadow: 0 0 20px rgba(52, 211, 153, 0.7); border-color: rgba(52,211,153,1); }
+}

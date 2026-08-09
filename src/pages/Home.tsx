@@ -1,20 +1,46 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { navigate } from '../App.js';
+import { ACCESS_PASSWORD } from '../config.js';
 
 export default function Home() {
   const [tokenInput, setTokenInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
   const [joinError, setJoinError] = useState('');
   const [tab, setTab] = useState<'host' | 'join'>('host');
 
-  const handleGoHost = useCallback(() => {
-    // Navigate to host page — it will create the room and show the share link
-    navigate('/?page=host');
+  // Load saved password from session storage if not in env
+  useEffect(() => {
+    if (!ACCESS_PASSWORD) {
+      const saved = sessionStorage.getItem('app_password');
+      if (saved) setPasswordInput(saved);
+    }
   }, []);
+
+  const handleSavePassword = (pwd: string) => {
+    setPasswordInput(pwd);
+    sessionStorage.setItem('app_password', pwd);
+  };
+
+  const handleGoHost = useCallback(() => {
+    if (!ACCESS_PASSWORD && !passwordInput.trim()) {
+      setJoinError('Введіть пароль доступу.');
+      return;
+    }
+    navigate('/?page=host');
+  }, [passwordInput]);
 
   const handleJoin = useCallback(() => {
     setJoinError('');
+    if (!ACCESS_PASSWORD && !passwordInput.trim()) {
+      setJoinError('Введіть пароль доступу.');
+      return;
+    }
+
     const raw = tokenInput.trim();
-    if (!raw) return;
+    if (!raw) {
+      setJoinError('Вставте посилання або токен.');
+      return;
+    }
 
     let token = raw;
     try {
@@ -28,7 +54,7 @@ export default function Home() {
     }
 
     navigate(`/?page=viewer&token=${token}`);
-  }, [tokenInput]);
+  }, [tokenInput, passwordInput]);
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6">
@@ -47,16 +73,37 @@ export default function Home() {
         <h1 className="text-2xl font-bold tracking-tight mb-1">Приватна трансляція</h1>
         <p className="text-sm text-white/50 mb-6">P2P · WebRTC · Зашифровано · &lt;150 мс</p>
 
+        {/* Global Password (if not in env) */}
+        {!ACCESS_PASSWORD && (
+          <div className="mb-6 bg-white/5 p-4 rounded-xl border border-white/10">
+            <label className="block text-xs font-medium text-white/40 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              Пароль доступу до сервера
+            </label>
+            <input
+              type="password"
+              value={passwordInput}
+              onChange={(e) => handleSavePassword(e.target.value)}
+              placeholder="Введіть пароль"
+              className="w-full px-3.5 py-2 bg-white/4 border border-white/10 rounded-lg
+                text-sm text-white placeholder-white/20 outline-none
+                focus:border-violet-500 focus:ring-2 focus:ring-violet-500/30 transition-all"
+            />
+          </div>
+        )}
+
         {/* Tabs */}
-        <div className="flex gap-1 bg-white/5 rounded-lg p-1 mb-7">
+        <div className="flex gap-1 bg-white/5 rounded-lg p-1 mb-7 border border-white/5">
           {(['host', 'join'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
               className={`flex-1 py-2 rounded-md text-sm font-medium transition-all duration-200 cursor-pointer
                 ${tab === t
-                  ? 'bg-violet-600 text-white shadow-lg shadow-violet-900/40'
-                  : 'text-white/50 hover:text-white/80'}`}
+                  ? 'bg-gradient-to-br from-violet-600 to-purple-500 text-white shadow-lg shadow-violet-900/40'
+                  : 'text-white/50 hover:text-white/80 hover:bg-white/5'}`}
             >
               {t === 'host' ? '🖥 Транслювати' : '👁 Переглянути'}
             </button>
@@ -110,11 +157,12 @@ export default function Home() {
             >
               Підключитись
             </button>
-            {joinError && (
-              <div className="px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg text-red-400 text-sm">
-                {joinError}
-              </div>
-            )}
+          </div>
+        )}
+
+        {joinError && (
+          <div className="mt-4 px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg text-red-400 text-sm">
+            {joinError}
           </div>
         )}
       </div>

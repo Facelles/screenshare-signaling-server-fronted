@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SERVER_URL, STUN_SERVERS } from '../config.js';
+import { SERVER_URL, STUN_SERVERS, ACCESS_PASSWORD } from '../config.js';
+import { useAudioVolume } from '../hooks/useAudioVolume.js';
 
 interface Props { token: string; }
 
@@ -17,7 +18,7 @@ const MIC_CONSTRAINTS: MediaStreamConstraints = {
 
 export default function Viewer({ token }: Props) {
   const videoRef       = useRef<HTMLVideoElement>(null);
-  const hostAudioRef   = useRef<HTMLAudioElement>(null);  // host mic (separate from screen audio)
+  const hostAudioRef   = useRef<HTMLAudioElement>(null);
   const containerRef   = useRef<HTMLDivElement>(null);
   const pcRef          = useRef<RTCPeerConnection | null>(null);
   const socketRef      = useRef<Socket | null>(null);
@@ -34,6 +35,13 @@ export default function Viewer({ token }: Props) {
   const [fps, setFps]             = useState(0);
   const [kbps, setKbps]           = useState(0);
   const [latencyMs, setLatencyMs] = useState(0);
+
+  // Audio streams for volume detection
+  const [localMicStream, setLocalMicStream] = useState<MediaStream | null>(null);
+  const isViewerSpeaking = useAudioVolume({ stream: localMicStream, threshold: 12 });
+
+  const [remoteMicStream, setRemoteMicStream] = useState<MediaStream | null>(null);
+  const isHostSpeaking = useAudioVolume({ stream: remoteMicStream, threshold: 12 });
 
   const revealHud = useCallback(() => {
     setShowHud(true);
@@ -72,7 +80,11 @@ export default function Viewer({ token }: Props) {
       return;
     }
 
-    const socket: Socket = io(SERVER_URL, { transports: ['websocket'] });
+    const pwd = ACCESS_PASSWORD || sessionStorage.getItem('app_password');
+    const socket: Socket = io(SERVER_URL, { 
+      transports: ['websocket'],
+      auth: { password: pwd }
+    });
     socketRef.current = socket;
 
     socket.on('connect', () => {
@@ -91,21 +103,20 @@ export default function Viewer({ token }: Props) {
 
       pc.ontrack = ({ track, streams }) => {
         if (track.kind === 'video') {
-          // Main screen video (with screen audio)
           if (videoRef.current && streams[0]) {
             videoRef.current.srcObject = streams[0];
             setStatus('playing');
           }
         } else if (track.kind === 'audio') {
-          // Check: is this a separate mic track (not part of screen stream)?
-          // We play it through the dedicated host audio element for clarity
           if (hostAudioRef.current) {
             const existing = hostAudioRef.current.srcObject as MediaStream | null;
             if (existing) {
               existing.addTrack(track);
             } else {
-              hostAudioRef.current.srcObject = new MediaStream([track]);
+              const stream = new MediaStream([track]);
+              hostAudioRef.current.srcObject = stream;
               hostAudioRef.current.play().catch(() => {});
+              setRemoteMicStream(stream);
             }
           }
         }
@@ -118,10 +129,10 @@ export default function Viewer({ token }: Props) {
       pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
           setStatus('host_left');
+          setRemoteMicStream(null);
         }
       };
 
-      // Handle renegotiation from host (e.g., host added mic later)
       pc.onnegotiationneeded = async () => {
         try {
           const offer = await pc.createOffer();
@@ -140,16 +151,18 @@ export default function Viewer({ token }: Props) {
       await pcRef.current?.addIceCandidate(candidate);
     });
 
-    // Host re-answered after mic renegotiation
     socket.on('host_answer', async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
       await pcRef.current?.setRemoteDescription(sdp);
     });
 
-    socket.on('host_left', () => setStatus('host_left'));
+    socket.on('host_left', () => {
+      setStatus('host_left');
+      setRemoteMicStream(null);
+    });
 
-    socket.on('connect_error', () => {
+    socket.on('connect_error', (err) => {
       setStatus('error');
-      setErrorMsg('Не вдалося підключитися до сигнального сервера.');
+      setErrorMsg(`Не вдалося підключитися до сигнального сервера: ${err.message}`);
     });
 
     return () => {
@@ -164,6 +177,7 @@ export default function Viewer({ token }: Props) {
     if (micOn) {
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
+      setLocalMicStream(null);
       if (micSenderRef.current && pcRef.current) {
         pcRef.current.removeTrack(micSenderRef.current);
         micSenderRef.current = null;
@@ -174,11 +188,11 @@ export default function Viewer({ token }: Props) {
         setMicError('');
         const micStream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS);
         micStreamRef.current = micStream;
+        setLocalMicStream(micStream);
         const micTrack = micStream.getAudioTracks()[0];
 
         if (pcRef.current) {
           micSenderRef.current = pcRef.current.addTrack(micTrack, micStream);
-          // Trigger renegotiation → onnegotiationneeded fires → viewer_offer sent
         }
         setMicOn(true);
       } catch {
@@ -213,11 +227,13 @@ export default function Viewer({ token }: Props) {
   if (status === 'error') return (
     <div className="min-h-screen flex items-center justify-center bg-[#09090f] p-6">
       <div className="glass rounded-2xl p-8 max-w-sm text-center space-y-4 page-enter">
-        <div className="text-4xl">⛔</div>
-        <h2 className="text-lg font-semibold">Помилка підключення</h2>
+        <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-2 text-red-500">
+          <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        </div>
+        <h2 className="text-xl font-bold tracking-tight text-white">Помилка підключення</h2>
         <p className="text-sm text-white/50">{errorMsg}</p>
         <button onClick={() => { window.location.href = '/'; }}
-          className="py-2.5 px-6 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-500 transition-colors cursor-pointer">
+          className="mt-4 w-full py-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-all cursor-pointer">
           На головну
         </button>
       </div>
@@ -227,11 +243,13 @@ export default function Viewer({ token }: Props) {
   if (status === 'host_left') return (
     <div className="min-h-screen flex items-center justify-center bg-[#09090f] p-6">
       <div className="glass rounded-2xl p-8 max-w-sm text-center space-y-4 page-enter">
-        <div className="text-4xl">📴</div>
-        <h2 className="text-lg font-semibold">Трансляцію завершено</h2>
-        <p className="text-sm text-white/50">Хост закрив трансляцію.</p>
+        <div className="w-12 h-12 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-2 text-white/50">
+          <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+        </div>
+        <h2 className="text-xl font-bold tracking-tight text-white">Трансляцію завершено</h2>
+        <p className="text-sm text-white/50">Хост закрив трансляцію або зник зв'язок.</p>
         <button onClick={() => { window.location.href = '/'; }}
-          className="py-2.5 px-6 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-500 transition-colors cursor-pointer">
+          className="mt-4 w-full py-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-all cursor-pointer">
           На головну
         </button>
       </div>
@@ -239,100 +257,104 @@ export default function Viewer({ token }: Props) {
   );
 
   return (
-    <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden"
+    <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden group"
       onMouseMove={revealHud} onClick={revealHud}>
 
-      {/* Hidden host mic audio (separate from screen audio in video element) */}
       <audio ref={hostAudioRef} autoPlay playsInline />
-
-      {/* Main video (screen + screen audio) */}
       <video ref={videoRef} id="viewer-video" autoPlay playsInline className="w-full h-full object-contain" />
 
-      {/* Waiting overlay */}
       {(status === 'connecting' || status === 'waiting_offer') && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-[#09090f] text-white/50">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 backdrop-blur-md z-10 text-white/60">
           <div className="spinner" />
-          <p className="text-sm">
+          <p className="text-sm font-medium tracking-wide">
             {status === 'connecting' ? 'Підключення до сервера...' : 'Очікування трансляції від хоста...'}
           </p>
         </div>
       )}
 
-      {/* HUD */}
-      <div className={`absolute top-0 left-0 right-0 flex items-center justify-between px-4 py-3
-        bg-gradient-to-b from-black/70 to-transparent
-        transition-opacity duration-400 ${showHud || status !== 'playing' ? 'opacity-100' : 'opacity-0'}`}>
+      {/* Speaking Indicators Overlay */}
+      {status === 'playing' && (
+        <div className={`absolute bottom-6 right-6 flex flex-col gap-3 transition-opacity duration-300 ${showHud ? 'opacity-100' : 'opacity-70'}`}>
+          {remoteMicStream && (
+            <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/10 shadow-lg">
+              <div className={`w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center avatar-base border-2 ${isHostSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
+                <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+              </div>
+              <span className="text-xs font-medium text-white/90">Хост</span>
+            </div>
+          )}
+          {micOn && (
+            <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/10 shadow-lg">
+              <div className={`w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center avatar-base border-2 ${isViewerSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
+                <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+              </div>
+              <span className="text-xs font-medium text-white/90">Ви</span>
+            </div>
+          )}
+        </div>
+      )}
 
-        {/* Left: LIVE */}
-        <div className="flex items-center gap-2">
+      {/* HUD (Top Bar) */}
+      <div className={`absolute top-0 left-0 right-0 flex items-center justify-between px-6 py-4
+        bg-gradient-to-b from-black/80 via-black/40 to-transparent
+        transition-opacity duration-500 z-20 ${showHud || status !== 'playing' ? 'opacity-100' : 'opacity-0'}`}>
+
+        <div className="flex items-center gap-3">
           {status === 'playing' && (
-            <>
+            <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
               <span className="w-2 h-2 rounded-full bg-emerald-400 pulse-dot" />
-              <span className="text-xs text-white/70 font-medium">LIVE</span>
-            </>
+              <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold">Live</span>
+            </div>
           )}
         </div>
 
-        {/* Center: stats */}
         {status === 'playing' && (
-          <div className="flex gap-4 text-xs text-white/50 font-mono">
+          <div className="flex gap-4 text-xs text-white/60 font-mono bg-black/40 px-4 py-1.5 rounded-full border border-white/5 backdrop-blur-sm hidden sm:flex">
             <span>{fps ? `${fps} fps` : '—'}</span>
-            <span>{kbps ? `${kbps} кбіт/с` : '—'}</span>
-            {latencyMs > 0 && <span>{latencyMs} мс RTT</span>}
+            <span>{kbps ? `${kbps} kbps` : '—'}</span>
+            {latencyMs > 0 && <span>{latencyMs}ms ping</span>}
           </div>
         )}
 
-        {/* Right: controls */}
         {status === 'playing' && (
           <div className="flex items-center gap-2">
-
-            {/* Mic button */}
-            <button onClick={handleToggleMic} title={micOn ? 'Вимкнути мік' : 'Увімкнути мік'}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-all
+            <button onClick={handleToggleMic} title={micOn ? 'Вимкнути мікрофон' : 'Увімкнути мікрофон'}
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium cursor-pointer transition-all shadow-md
                 ${micOn
-                  ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
-                  : 'bg-white/10 text-white/60 hover:text-white border border-white/10'}`}>
+                  ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-400'
+                  : 'bg-white/10 text-white/80 hover:text-white hover:bg-white/20 backdrop-blur-sm'}`}>
               {micOn ? (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
-                  <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
-                </svg>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
               ) : (
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="2" y1="2" x2="22" y2="22"/>
-                  <path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33"/><path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8"/>
-                </svg>
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="2" x2="22" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33"/><path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8"/></svg>
               )}
-              {micOn ? 'Мік увімк.' : 'Мік вимк.'}
+              <span className="hidden sm:inline">{micOn ? 'Увімк.' : 'Вимк.'}</span>
             </button>
 
-            {/* PiP */}
             {'pictureInPictureEnabled' in document && (
               <button onClick={togglePip} title="Picture-in-Picture"
-                className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-colors cursor-pointer">
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="2" y="4" width="20" height="16" rx="2"/>
-                  <rect x="12" y="11" width="9" height="7" rx="1.5" fill="currentColor" stroke="none"/>
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all cursor-pointer backdrop-blur-sm">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="9" height="7" rx="1.5" fill="currentColor" stroke="none"/>
                 </svg>
               </button>
             )}
 
-            {/* Fullscreen */}
             <button onClick={toggleFullscreen} title="На весь екран"
-              className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white/60 hover:text-white transition-colors cursor-pointer">
+              className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition-all cursor-pointer backdrop-blur-sm">
               {isFullscreen
-                ? <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
-                : <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7"/></svg>
+                ? <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
+                : <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7"/></svg>
               }
             </button>
           </div>
         )}
       </div>
 
-      {/* Mic error toast */}
       {micError && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2
-          px-4 py-2 bg-red-500/20 border border-red-500/40 rounded-lg text-red-400 text-sm">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-30
+          px-4 py-2.5 bg-red-500/20 backdrop-blur-md border border-red-500/40 rounded-xl text-red-200 text-sm shadow-xl flex items-center gap-2">
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
           {micError}
         </div>
       )}
