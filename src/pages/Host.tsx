@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { io, Socket } from 'socket.io-client';
+import { HostHud } from '../components/host/HostHud';
 import { SERVER_URL, STUN_SERVERS, VIDEO_MAX_BITRATE, VIDEO_START_BITRATE, ACCESS_PASSWORD } from '../config';
 import { useAudioVolume } from '../hooks/useAudioVolume';
 
@@ -310,6 +312,58 @@ export default function Host(_props: Props) {
     error: { label: 'Помилка', dot: 'bg-red-400', text: 'text-red-400' },
   }[status];
 
+  const [pipWindow, setPipWindow] = useState<Window | null>(null);
+
+  const togglePip = useCallback(async () => {
+    if (pipWindow) {
+      pipWindow.close();
+      return;
+    }
+    if (!('documentPictureInPicture' in window)) {
+      alert('Ваш браузер не підтримує Міні-вікно (Document PiP). Оновіть Chrome або Edge.');
+      return;
+    }
+    try {
+      const pipWin = await window.documentPictureInPicture!.requestWindow({ width: 340, height: 280 });
+      [...document.styleSheets].forEach((styleSheet) => {
+        try {
+          const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
+          const style = document.createElement('style');
+          style.textContent = cssRules;
+          pipWin.document.head.appendChild(style);
+        } catch (e) {
+          const link = document.createElement('link');
+          link.rel = 'stylesheet';
+          link.type = styleSheet.type;
+          link.media = styleSheet.media.mediaText;
+          if (styleSheet.href) link.href = styleSheet.href;
+          pipWin.document.head.appendChild(link);
+        }
+      });
+      pipWin.document.body.className = 'bg-[#09090f] text-white overflow-hidden p-5 flex flex-col gap-4 font-sans';
+      pipWin.addEventListener('pagehide', () => setPipWindow(null));
+      setPipWindow(pipWin);
+    } catch (e) {
+      console.error(e);
+    }
+  }, [pipWindow]);
+
+  const hudProps = {
+    micOn,
+    status,
+    remoteMicStream,
+    isHostSpeaking,
+    isViewerSpeaking,
+    isViewerMuted,
+    setIsViewerMuted,
+    handleToggleMic,
+    fps,
+    kbps,
+    sharing,
+    handleStartShare,
+    stopSharing,
+  };
+
   return (
     <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 gap-5">
       {/* We mute the audio element because we are playing it via Web Audio API GainNode instead */}
@@ -346,24 +400,6 @@ export default function Host(_props: Props) {
         <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 group">
           <video ref={videoRef} id="host-video" autoPlay playsInline muted className="w-full h-full object-cover" />
 
-          {/* Overlay Mute Viewer Button */}
-          {status === 'connected' && remoteMicStream && (
-            <div className={`absolute top-4 right-4 z-20 transition-opacity duration-300 opacity-0 group-hover:opacity-100`}>
-              <button onClick={() => setIsViewerMuted(!isViewerMuted)}
-                title={isViewerMuted ? 'Увімкнути звук глядача' : 'Заглушити глядача'}
-                className={`p-2 rounded-lg backdrop-blur-md border transition-all cursor-pointer shadow-lg
-                  ${isViewerMuted
-                    ? 'bg-red-500/80 border-red-400 text-white hover:bg-red-500'
-                    : 'bg-black/50 border-white/10 text-white/80 hover:text-white hover:bg-black/70'}`}>
-                {isViewerMuted ? (
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
-                ) : (
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-                )}
-              </button>
-            </div>
-          )}
-
           {!sharing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/30 bg-black/40">
               <svg className="w-12 h-12 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -372,90 +408,20 @@ export default function Host(_props: Props) {
               <span className="text-sm font-medium">Екран не транслюється</span>
             </div>
           )}
-
-          {/* Speaking Indicators Overlay */}
-          <div className="absolute bottom-4 right-4 flex flex-col gap-3">
-            {/* Host Avatar */}
-            {micOn && (
-              <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/10">
-                <div className={`w-7 h-7 rounded-full bg-violet-600 flex items-center justify-center avatar-base border-2 ${isHostSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
-                  <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" /></svg>
-                </div>
-                <span className="text-xs font-medium text-white/80">Ви</span>
-              </div>
-            )}
-            {/* Viewer Avatar */}
-            {status === 'connected' && remoteMicStream && (
-              <div className="flex items-center gap-2 bg-black/60 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/10">
-                <div className={`w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center avatar-base border-2 ${isViewerSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
-                  <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-                </div>
-                <span className="text-xs font-medium text-white/80">Глядач</span>
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Controls */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          {!sharing ? (
-            <button onClick={handleStartShare} disabled={status === 'init' || status === 'error'}
-              className="w-full sm:w-auto py-3 px-6 rounded-xl bg-gradient-to-r from-violet-600 to-purple-500
-                text-white font-semibold text-sm cursor-pointer shadow-lg
-                hover:shadow-violet-500/50 hover:-translate-y-0.5
-                active:scale-95 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed">
-              ▶ Почати трансляцію
-            </button>
-          ) : (
-            <button onClick={stopSharing}
-              className="w-full sm:w-auto py-3 px-6 rounded-xl bg-red-600 border border-red-500/40
-                text-white font-semibold text-sm cursor-pointer shadow-lg
-                hover:bg-red-500 hover:shadow-red-500/50 hover:-translate-y-0.5
-                transition-all duration-200 active:scale-95">
-              ■ Зупинити
-            </button>
-          )}
-
-          {/* Mic button */}
-          {status === 'connected' && (
-            <button onClick={handleToggleMic}
-              className={`w-full sm:w-auto flex items-center justify-center gap-2 py-3 px-5 rounded-xl border text-sm font-medium cursor-pointer shadow-lg
-                transition-all duration-200 active:scale-95
-                ${micOn
-                  ? 'bg-emerald-500 border-emerald-400 text-white shadow-emerald-500/30 hover:bg-emerald-400'
-                  : 'bg-white/10 border-white/10 text-white/70 hover:text-white hover:bg-white/20'
-                }`}>
-              {micOn ? (
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
-                  <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="2" y1="2" x2="22" y2="22" />
-                  <path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33" />
-                  <path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8" />
-                </svg>
-              )}
-              {micOn ? 'Мікрофон увімк.' : 'Мікрофон вимк.'}
-            </button>
-          )}
-        </div>
-
-        {/* Stats */}
+        {/* PiP Button */}
         {status === 'connected' && (
-          <div className="grid grid-cols-2 gap-4">
-            {[
-              { label: 'FPS', value: fps ? `${fps}` : '—' },
-              { label: 'Бітрейт', value: kbps ? `${kbps} кбіт/с` : '—' },
-            ].map(({ label, value }) => (
-              <div key={label} className="bg-black/30 border border-white/5 rounded-xl p-3 text-center shadow-inner">
-                <p className="text-[10px] text-white/40 uppercase tracking-widest mb-1">{label}</p>
-                <p className="text-lg font-bold text-white/90">{value}</p>
-              </div>
-            ))}
-          </div>
+           <button onClick={togglePip} className="w-full flex items-center justify-center gap-2 py-3 mb-2 bg-blue-500/20 text-blue-300 rounded-xl text-sm font-medium hover:bg-blue-500/30 transition-all cursor-pointer border border-blue-500/20 shadow-lg">
+             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><rect x="12" y="12" width="7" height="5"></rect></svg>
+             {pipWindow ? 'Закрити міні-вікно' : 'Відкрити міні-вікно (PiP)'}
+           </button>
         )}
+
+        {pipWindow 
+          ? createPortal(<HostHud {...hudProps} />, pipWindow.document.body) 
+          : <HostHud {...hudProps} />
+        }
 
         {error && (
           <div className="px-4 py-3 bg-red-500/10 border border-red-500/25 rounded-xl text-red-400 text-sm flex items-center gap-2">
