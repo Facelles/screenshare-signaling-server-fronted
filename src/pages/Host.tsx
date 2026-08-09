@@ -218,6 +218,11 @@ export default function Host(_props: Props) {
       if (micSenderRef.current && pcRef.current) {
         pcRef.current.removeTrack(micSenderRef.current);
         micSenderRef.current = null;
+        try {
+          const offer = await pcRef.current.createOffer();
+          await pcRef.current.setLocalDescription(offer);
+          socketRef.current?.emit('offer', { sdp: pcRef.current.localDescription });
+        } catch {}
       }
       setMicOn(false);
     } else {

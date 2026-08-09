@@ -121,19 +121,11 @@ export default function Viewer({ token }: Props) {
         };
 
         pc.onconnectionstatechange = () => {
-          if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
+          if (!pc) return;
+          if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
             setStatus('host_left');
             setRemoteMicStream(null);
           }
-        };
-
-        pc.onnegotiationneeded = async () => {
-          try {
-            if (!pc) return;
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            socket.emit('viewer_offer', { sdp: pc.localDescription });
-          } catch { /* ignore */ }
         };
       }
 
@@ -178,6 +170,11 @@ export default function Viewer({ token }: Props) {
       if (micSenderRef.current && pcRef.current) {
         pcRef.current.removeTrack(micSenderRef.current);
         micSenderRef.current = null;
+        try {
+          const offer = await pcRef.current.createOffer();
+          await pcRef.current.setLocalDescription(offer);
+          socketRef.current?.emit('viewer_offer', { sdp: pcRef.current.localDescription });
+        } catch {}
       }
       setMicOn(false);
     } else {
@@ -190,6 +187,11 @@ export default function Viewer({ token }: Props) {
 
         if (pcRef.current) {
           micSenderRef.current = pcRef.current.addTrack(micTrack, micStream);
+          try {
+            const offer = await pcRef.current.createOffer();
+            await pcRef.current.setLocalDescription(offer);
+            socketRef.current?.emit('viewer_offer', { sdp: pcRef.current.localDescription });
+          } catch {}
         }
         setMicOn(true);
       } catch {
