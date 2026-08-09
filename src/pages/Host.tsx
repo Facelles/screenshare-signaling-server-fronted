@@ -31,6 +31,7 @@ async function applyBitrate(pc: RTCPeerConnection, start: number, max: number): 
 }
 
 export default function Host(_props: Props) {
+  const viewerJoinedRef = useRef(false);
   const videoRef   = useRef<HTMLVideoElement>(null);
   const pcRef      = useRef<RTCPeerConnection | null>(null);
   const socketRef  = useRef<Socket | null>(null);
@@ -90,12 +91,13 @@ export default function Host(_props: Props) {
     });
 
     socket.on('viewer_joined', async () => {
-      if (!pcRef.current) {
-        // Viewer joined before screen share started — create PC when share starts
-        setStatus('connected');
-        return;
+      viewerJoinedRef.current = true;
+      setStatus('connected');
+      // If stream is already active — send offer immediately
+      if (streamRef.current) {
+        await startOffer(socket);
       }
-      await startOffer(socket);
+      // else: handleStartShare will call startOffer once user shares screen
     });
 
     socket.on('answer', async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
@@ -162,8 +164,8 @@ export default function Host(_props: Props) {
       stream.getVideoTracks()[0].onended = stopSharing;
       setSharing(true);
 
-      // If viewer already joined before share started
-      if (status === 'connected') {
+      // If viewer already joined before screen share started
+      if (viewerJoinedRef.current) {
         await startOffer(socketRef.current!);
       }
     } catch (err) {
