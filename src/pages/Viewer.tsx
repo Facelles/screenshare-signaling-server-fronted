@@ -125,6 +125,15 @@ export default function Viewer({ token }: Props) {
           if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
             setStatus('host_left');
             setRemoteMicStream(null);
+            setRemoteAudioStreams([]);
+
+            // Auto-reconnect WebRTC after a short delay
+            setTimeout(() => {
+              if (socketRef.current?.connected) {
+                console.log('Attempting auto-reconnect...');
+                socketRef.current.emit('join_room', { token });
+              }
+            }, 2500);
           }
         };
       }
