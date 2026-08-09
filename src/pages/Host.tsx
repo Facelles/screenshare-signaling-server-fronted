@@ -59,11 +59,21 @@ export default function Host(_props: Props) {
 
   // Expose local mic stream to state for volume hook
   const [localMicStream, setLocalMicStream] = useState<MediaStream | null>(null);
+  const [isViewerMuted, setIsViewerMuted] = useState(false);
+
+  // Audio analyzer for Host's own microphone
   const isHostSpeaking = useAudioVolume({ stream: localMicStream, threshold: 12 });
 
   // Expose remote viewer mic stream to state for volume hook
   const [remoteMicStream, setRemoteMicStream] = useState<MediaStream | null>(null);
   const isViewerSpeaking = useAudioVolume({ stream: remoteMicStream, threshold: 12 });
+
+  // Software VAD: Disable track when not speaking to save bandwidth
+  useEffect(() => {
+    if (localMicStream) {
+      localMicStream.getAudioTracks().forEach(t => t.enabled = isHostSpeaking);
+    }
+  }, [isHostSpeaking, localMicStream]);
 
   // ── Stats ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -253,7 +263,7 @@ export default function Host(_props: Props) {
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 gap-5">
-      <audio ref={viewerAudioRef} autoPlay playsInline />
+      <audio ref={viewerAudioRef} autoPlay playsInline muted={isViewerMuted} />
 
       <div className="glass rounded-2xl p-6 md:p-8 w-full max-w-xl page-enter space-y-6">
 
@@ -283,8 +293,27 @@ export default function Host(_props: Props) {
         )}
 
         {/* Preview */}
-        <div className="relative rounded-xl overflow-hidden bg-black/60 border border-white/10 shadow-lg aspect-video">
-          <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain" />
+        <div className="relative w-full aspect-video bg-black rounded-2xl overflow-hidden shadow-2xl ring-1 ring-white/10 group">
+          <video ref={videoRef} id="host-video" autoPlay playsInline muted className="w-full h-full object-cover" />
+
+          {/* Overlay Mute Viewer Button */}
+          {status === 'connected' && remoteMicStream && (
+            <div className={`absolute top-4 right-4 z-20 transition-opacity duration-300 opacity-0 group-hover:opacity-100`}>
+              <button onClick={() => setIsViewerMuted(!isViewerMuted)}
+                title={isViewerMuted ? 'Увімкнути звук глядача' : 'Заглушити глядача'}
+                className={`p-2 rounded-lg backdrop-blur-md border transition-all cursor-pointer shadow-lg
+                  ${isViewerMuted
+                    ? 'bg-red-500/80 border-red-400 text-white hover:bg-red-500'
+                    : 'bg-black/50 border-white/10 text-white/80 hover:text-white hover:bg-black/70'}`}>
+                {isViewerMuted ? (
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                ) : (
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                )}
+              </button>
+            </div>
+          )}
+
           {!sharing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/30 bg-black/40">
               <svg className="w-12 h-12 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">

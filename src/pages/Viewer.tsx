@@ -17,23 +17,23 @@ const MIC_CONSTRAINTS: MediaStreamConstraints = {
 };
 
 export default function Viewer({ token }: Props) {
-  const videoRef       = useRef<HTMLVideoElement>(null);
-  const hostAudioRef   = useRef<HTMLAudioElement>(null);
-  const containerRef   = useRef<HTMLDivElement>(null);
-  const pcRef          = useRef<RTCPeerConnection | null>(null);
-  const socketRef      = useRef<Socket | null>(null);
-  const micStreamRef   = useRef<MediaStream | null>(null);
-  const micSenderRef   = useRef<RTCRtpSender | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hostAudioRef = useRef<HTMLAudioElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const socketRef = useRef<Socket | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const micSenderRef = useRef<RTCRtpSender | null>(null);
 
-  const [status, setStatus]       = useState<Status>('connecting');
-  const [errorMsg, setErrorMsg]   = useState('');
-  const [micOn, setMicOn]         = useState(false);
-  const [micError, setMicError]   = useState('');
+  const [status, setStatus] = useState<Status>('connecting');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [micOn, setMicOn] = useState(false);
+  const [micError, setMicError] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showHud, setShowHud]     = useState(false);
+  const [showHud, setShowHud] = useState(false);
   const hudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [fps, setFps]             = useState(0);
-  const [kbps, setKbps]           = useState(0);
+  const [fps, setFps] = useState(0);
+  const [kbps, setKbps] = useState(0);
   const [latencyMs, setLatencyMs] = useState(0);
 
   // Audio streams for volume detection
@@ -48,6 +48,13 @@ export default function Viewer({ token }: Props) {
     if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
     hudTimerRef.current = setTimeout(() => setShowHud(false), 3000);
   }, []);
+
+  // Software VAD: Disable track when not speaking to save bandwidth
+  useEffect(() => {
+    if (localMicStream) {
+      localMicStream.getAudioTracks().forEach(t => t.enabled = isViewerSpeaking);
+    }
+  }, [isViewerSpeaking, localMicStream]);
 
   // ── Stats ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -81,7 +88,7 @@ export default function Viewer({ token }: Props) {
     }
 
     const pwd = ACCESS_PASSWORD || sessionStorage.getItem('app_password');
-    const socket: Socket = io(SERVER_URL, { 
+    const socket: Socket = io(SERVER_URL, {
       transports: ['websocket'],
       auth: { password: pwd }
     });
@@ -98,49 +105,57 @@ export default function Viewer({ token }: Props) {
     });
 
     socket.on('offer', async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
-      const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
-      pcRef.current = pc;
+      let pc = pcRef.current;
+      if (!pc) {
+        pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+        pcRef.current = pc;
 
-      pc.ontrack = ({ track, streams }) => {
-        if (track.kind === 'video') {
-          if (videoRef.current && streams[0]) {
-            videoRef.current.srcObject = streams[0];
-            setStatus('playing');
-          }
-        } else if (track.kind === 'audio') {
-          if (hostAudioRef.current) {
-            const existing = hostAudioRef.current.srcObject as MediaStream | null;
-            if (existing) {
-              existing.addTrack(track);
-            } else {
-              const stream = new MediaStream([track]);
-              hostAudioRef.current.srcObject = stream;
-              hostAudioRef.current.play().catch(() => {});
-              setRemoteMicStream(stream);
+        pc.ontrack = ({ track, streams }) => {
+          if (track.kind === 'video') {
+            if (videoRef.current && streams[0]) {
+              videoRef.current.srcObject = streams[0];
+              setStatus('playing');
+            }
+          } else if (track.kind === 'audio') {
+            if (hostAudioRef.current) {
+              const existing = hostAudioRef.current.srcObject as MediaStream | null;
+              if (existing) {
+                existing.addTrack(track);
+                // Re-assign to force HTMLMediaElement to recognize the new track
+                hostAudioRef.current.srcObject = null;
+                hostAudioRef.current.srcObject = existing;
+              } else {
+                const stream = new MediaStream([track]);
+                hostAudioRef.current.srcObject = stream;
+                hostAudioRef.current.play().catch(() => { });
+                setRemoteMicStream(stream);
+              }
             }
           }
-        }
-      };
+        };
 
-      pc.onicecandidate = ({ candidate }) => {
-        if (candidate) socket.emit('ice_candidate', { candidate });
-      };
+        pc.onicecandidate = ({ candidate }) => {
+          if (candidate) socket.emit('ice_candidate', { candidate });
+        };
 
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-          setStatus('host_left');
-          setRemoteMicStream(null);
-        }
-      };
+        pc.onconnectionstatechange = () => {
+          if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'disconnected')) {
+            setStatus('host_left');
+            setRemoteMicStream(null);
+          }
+        };
 
-      pc.onnegotiationneeded = async () => {
-        try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit('viewer_offer', { sdp: pc.localDescription });
-        } catch { /* ignore */ }
-      };
+        pc.onnegotiationneeded = async () => {
+          try {
+            if (!pc) return;
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            socket.emit('viewer_offer', { sdp: pc.localDescription });
+          } catch { /* ignore */ }
+        };
+      }
 
+      if (!pc) return;
       await pc.setRemoteDescription(sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -276,7 +291,7 @@ export default function Viewer({ token }: Props) {
       <div className={`absolute top-0 left-0 right-0 flex items-start justify-between px-4 sm:px-6 py-4
         bg-gradient-to-b from-black/70 to-transparent pointer-events-none
         transition-opacity duration-500 z-20 ${showHud || status !== 'playing' ? 'opacity-100' : 'opacity-0'}`}>
-        
+
         {/* Top Left: Stats */}
         <div className="flex flex-col gap-2 pointer-events-auto">
           {status === 'playing' && (
@@ -309,7 +324,7 @@ export default function Viewer({ token }: Props) {
               <div className="flex items-center justify-end gap-2 bg-black/40 backdrop-blur-md pl-2 pr-3 py-1.5 rounded-full border border-white/5 shadow-lg">
                 <span className="text-xs font-medium text-white/80">Ви</span>
                 <div className={`w-7 h-7 rounded-full bg-blue-600 flex items-center justify-center avatar-base border-2 ${isViewerSpeaking ? 'avatar-speaking' : 'border-transparent'}`}>
-                  <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+                  <svg className="w-3.5 h-3.5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" /></svg>
                 </div>
               </div>
             )}
@@ -329,9 +344,9 @@ export default function Viewer({ token }: Props) {
                 ? 'bg-emerald-500 text-white shadow-emerald-500/20 hover:bg-emerald-400'
                 : 'bg-white/10 text-white hover:bg-white/20'}`}>
             {micOn ? (
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" /><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" /></svg>
             ) : (
-              <svg className="w-5 h-5 text-white/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="2" x2="22" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33"/><path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8"/></svg>
+              <svg className="w-5 h-5 text-white/70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="2" x2="22" y2="22" /><path d="M18.89 13.23A7.12 7.12 0 0019 12v-2M5 10v2a7 7 0 007 7M15 9.34V4a3 3 0 00-5.68-1.33" /><path d="M9 9v3a3 3 0 005.12 2.12M12 19v4M8 23h8" /></svg>
             )}
             <span>{micOn ? 'Мікрофон' : 'Увімкнути'}</span>
           </button>
@@ -342,7 +357,7 @@ export default function Viewer({ token }: Props) {
             <button onClick={togglePip} title="Picture-in-Picture"
               className="p-3 rounded-xl bg-white/5 hover:bg-white/15 text-white/80 hover:text-white transition-all cursor-pointer active:scale-95">
               <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="11" width="9" height="7" rx="1.5" fill="currentColor" stroke="none"/>
+                <rect x="2" y="4" width="20" height="16" rx="2" /><rect x="12" y="11" width="9" height="7" rx="1.5" fill="currentColor" stroke="none" />
               </svg>
             </button>
           )}
@@ -350,8 +365,8 @@ export default function Viewer({ token }: Props) {
           <button onClick={toggleFullscreen} title="На весь екран"
             className="p-3 rounded-xl bg-white/5 hover:bg-white/15 text-white/80 hover:text-white transition-all cursor-pointer active:scale-95">
             {isFullscreen
-              ? <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
-              : <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7"/></svg>
+              ? <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" /></svg>
+              : <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6m0 0v6m0-6l-7 7M9 21H3m0 0v-6m0 6l7-7" /></svg>
             }
           </button>
         </div>
