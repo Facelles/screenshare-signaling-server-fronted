@@ -112,10 +112,16 @@ export default function Viewer({ token }: Props) {
     });
 
     socket.on('offer', async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
-      let pc = pcRef.current;
-      if (!pc) {
-        pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
-        pcRef.current = pc;
+      const createPeerConnection = () => {
+        if (pcRef.current) {
+          pcRef.current.close();
+        }
+        const newPc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+        pcRef.current = newPc;
+        return newPc;
+      };
+
+      const pc = createPeerConnection();
 
         pc.ontrack = (event) => {
           const streamId = event.streams[0]?.id || '';
@@ -151,9 +157,7 @@ export default function Viewer({ token }: Props) {
             }, 2500);
           }
         };
-      }
 
-      if (!pc) return;
       await pc.setRemoteDescription(sdp);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
