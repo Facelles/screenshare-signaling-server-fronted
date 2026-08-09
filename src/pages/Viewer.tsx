@@ -18,7 +18,6 @@ const MIC_CONSTRAINTS: MediaStreamConstraints = {
 
 export default function Viewer({ token }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hostAudioRef = useRef<HTMLAudioElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
@@ -42,19 +41,13 @@ export default function Viewer({ token }: Props) {
 
   const [remoteMicStream, setRemoteMicStream] = useState<MediaStream | null>(null);
   const isHostSpeaking = useAudioVolume({ stream: remoteMicStream, threshold: 12 });
+  const [remoteAudioStreams, setRemoteAudioStreams] = useState<MediaStream[]>([]);
 
   const revealHud = useCallback(() => {
     setShowHud(true);
     if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
     hudTimerRef.current = setTimeout(() => setShowHud(false), 3000);
   }, []);
-
-  // Software VAD: Disable track when not speaking to save bandwidth
-  useEffect(() => {
-    if (localMicStream) {
-      localMicStream.getAudioTracks().forEach(t => t.enabled = isViewerSpeaking);
-    }
-  }, [isViewerSpeaking, localMicStream]);
 
   // ── Stats ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -117,20 +110,9 @@ export default function Viewer({ token }: Props) {
               setStatus('playing');
             }
           } else if (track.kind === 'audio') {
-            if (hostAudioRef.current) {
-              const existing = hostAudioRef.current.srcObject as MediaStream | null;
-              if (existing) {
-                existing.addTrack(track);
-                // Re-assign to force HTMLMediaElement to recognize the new track
-                hostAudioRef.current.srcObject = null;
-                hostAudioRef.current.srcObject = existing;
-              } else {
-                const stream = new MediaStream([track]);
-                hostAudioRef.current.srcObject = stream;
-                hostAudioRef.current.play().catch(() => { });
-                setRemoteMicStream(stream);
-              }
-            }
+            const stream = new MediaStream([track]);
+            setRemoteAudioStreams(prev => [...prev, stream]);
+            setRemoteMicStream(stream); // Keep the last one for speaking indicator
           }
         };
 
@@ -275,7 +257,11 @@ export default function Viewer({ token }: Props) {
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden group"
       onMouseMove={revealHud} onClick={revealHud} onTouchStart={revealHud}>
 
-      <audio ref={hostAudioRef} autoPlay playsInline />
+      {/* Render an audio tag for EVERY incoming audio stream (System + Mic) */}
+      {remoteAudioStreams.map((stream, i) => (
+        <audio key={i} autoPlay playsInline ref={el => { if (el) el.srcObject = stream; }} />
+      ))}
+
       <video ref={videoRef} id="viewer-video" autoPlay playsInline className="w-full h-full object-contain" />
 
       {(status === 'connecting' || status === 'waiting_offer') && (

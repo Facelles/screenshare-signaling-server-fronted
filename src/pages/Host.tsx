@@ -68,13 +68,6 @@ export default function Host(_props: Props) {
   const [remoteMicStream, setRemoteMicStream] = useState<MediaStream | null>(null);
   const isViewerSpeaking = useAudioVolume({ stream: remoteMicStream, threshold: 12 });
 
-  // Software VAD: Disable track when not speaking to save bandwidth
-  useEffect(() => {
-    if (localMicStream) {
-      localMicStream.getAudioTracks().forEach(t => t.enabled = isHostSpeaking);
-    }
-  }, [isHostSpeaking, localMicStream]);
-
   // ── Stats ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (status !== 'connected') return;
