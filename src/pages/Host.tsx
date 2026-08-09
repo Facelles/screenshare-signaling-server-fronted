@@ -68,6 +68,45 @@ export default function Host(_props: Props) {
   const [remoteMicStream, setRemoteMicStream] = useState<MediaStream | null>(null);
   const isViewerSpeaking = useAudioVolume({ stream: remoteMicStream, threshold: 12 });
 
+  // Web Audio API refs for volume boosting
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
+  // ── Boost Viewer Volume (Підсилення звуку Глядача) ─────────────────────
+  useEffect(() => {
+    if (!remoteMicStream) return;
+    
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    
+    if (audioCtxRef.current.state === 'suspended') {
+      audioCtxRef.current.resume();
+    }
+    
+    const ctx = audioCtxRef.current;
+    gainNodeRef.current = ctx.createGain();
+    gainNodeRef.current.gain.value = isViewerMuted ? 0 : 3.0; // 300% boost!
+    
+    sourceNodeRef.current = ctx.createMediaStreamSource(remoteMicStream);
+    sourceNodeRef.current.connect(gainNodeRef.current);
+    gainNodeRef.current.connect(ctx.destination);
+    
+    return () => {
+      sourceNodeRef.current?.disconnect();
+      gainNodeRef.current?.disconnect();
+    };
+  }, [remoteMicStream]);
+
+  // Handle Mute state change for the boosted audio
+  useEffect(() => {
+    if (gainNodeRef.current) {
+      // Smoothly transition volume to avoid popping sounds
+      gainNodeRef.current.gain.setTargetAtTime(isViewerMuted ? 0 : 3.0, audioCtxRef.current!.currentTime, 0.1);
+    }
+  }, [isViewerMuted]);
+
   // ── Stats ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (status !== 'connected') return;
@@ -261,7 +300,8 @@ export default function Host(_props: Props) {
 
   return (
     <div className="relative z-10 min-h-screen flex flex-col items-center justify-center p-6 gap-5">
-      <audio ref={viewerAudioRef} autoPlay playsInline muted={isViewerMuted} />
+      {/* We mute the audio element because we are playing it via Web Audio API GainNode instead */}
+      <audio ref={viewerAudioRef} autoPlay playsInline muted={true} />
 
       <div className="glass rounded-2xl p-6 md:p-8 w-full max-w-xl page-enter space-y-6">
 
