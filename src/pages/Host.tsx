@@ -3,56 +3,65 @@ import { io, Socket } from 'socket.io-client';
 import { SERVER_URL, STUN_SERVERS, VIDEO_MAX_BITRATE, VIDEO_START_BITRATE } from '../config.js';
 
 interface Props {
-  token: string;
+  token: string; // pre-assigned token (empty on first load — host creates room)
 }
 
-type Status = 'waiting' | 'sharing' | 'connected' | 'viewer_left' | 'error';
+type Status = 'init' | 'waiting' | 'connected' | 'viewer_left' | 'error';
 
-/** Prefer VP9, fall back to H.264 */
-function preferCodec(sdp: string): string {
-  const vp9Line = sdp.match(/a=rtpmap:(\d+) VP9/);
-  if (!vp9Line) return sdp;
-  const pt = vp9Line[1];
-  return sdp.replace(/m=video (\d+) UDP\/TLS\/RTP\/SAVPF .+/, (m) => {
-    const parts = m.split(' ');
-    const rest = parts.filter((p) => p !== pt);
-    rest.splice(3, 0, pt); // put VP9 first after "m=video <port> <proto>"
-    return rest.join(' ');
+/** Prefer VP9, fallback H.264 */
+function preferVP9(sdp: string): string {
+  const match = sdp.match(/a=rtpmap:(\d+) VP9/);
+  if (!match) return sdp;
+  const pt = match[1];
+  return sdp.replace(/m=video (\S+ \S+ )(.+)/, (_m, prefix, pts) => {
+    const list = pts.split(' ').filter((p: string) => p !== pt);
+    return `m=video ${prefix}${pt} ${list.join(' ')}`;
   });
 }
 
-/** Set max bitrate on video sender */
-async function applyBitrate(
-  pc: RTCPeerConnection,
-  startBps: number,
-  maxBps: number,
-): Promise<void> {
+async function applyBitrate(pc: RTCPeerConnection, start: number, max: number): Promise<void> {
   const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
   if (!sender) return;
   const params = sender.getParameters();
   if (!params.encodings?.length) params.encodings = [{}];
-  params.encodings[0].maxBitrate = maxBps;
+  params.encodings[0].maxBitrate = max;
   params.encodings[0].maxFramerate = 60;
-  // startBitrate is a hint not standard — guard it
-  (params.encodings[0] as Record<string, unknown>)['startBitrate'] = startBps;
+  (params.encodings[0] as Record<string, unknown>)['startBitrate'] = start;
   await sender.setParameters(params);
 }
 
-export default function Host({ token }: Props) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const pcRef    = useRef<RTCPeerConnection | null>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+export default function Host(_props: Props) {
+  const videoRef   = useRef<HTMLVideoElement>(null);
+  const pcRef      = useRef<RTCPeerConnection | null>(null);
+  const socketRef  = useRef<Socket | null>(null);
+  const streamRef  = useRef<MediaStream | null>(null);
 
-  const [status, setStatus] = useState<Status>('waiting');
-  const [sharing, setSharing] = useState(false);
-  const [shareLink] = useState(`${window.location.origin}/?page=viewer&token=${token}`);
-  const [copied, setCopied] = useState(false);
-  const [error, setError] = useState('');
+  const [status, setStatus]     = useState<Status>('init');
+  const [sharing, setSharing]   = useState(false);
+  const [shareLink, setShareLink] = useState('');
+  const [copied, setCopied]     = useState(false);
+  const [error, setError]       = useState('');
+  const [fps, setFps]           = useState(0);
+  const [kbps, setKbps]         = useState(0);
 
-  // ── Stats ──────────────────────────────────────────────────────────────
-  const [fps, setFps] = useState<number>(0);
-  const [kbps, setKbps] = useState<number>(0);
+  // ── Stats polling ──────────────────────────────────────────────────────
+  useEffect(() => {
+    if (status !== 'connected') return;
+    let lastBytes = 0;
+    const id = setInterval(async () => {
+      const stats = await pcRef.current?.getStats();
+      stats?.forEach((r) => {
+        if (r.type === 'outbound-rtp' && r.kind === 'video') {
+          const bytes = (r as RTCOutboundRtpStreamStats).bytesSent ?? 0;
+          const fr = (r as RTCOutboundRtpStreamStats & { framesPerSecond?: number }).framesPerSecond;
+          setKbps(Math.round(((bytes - lastBytes) * 8) / 1000));
+          lastBytes = bytes;
+          if (fr) setFps(Math.round(fr));
+        }
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [status]);
 
   const stopSharing = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -64,67 +73,29 @@ export default function Host({ token }: Props) {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  // ── Stats polling ──────────────────────────────────────────────────────
-  useEffect(() => {
-    if (status !== 'connected') return;
-    let lastBytes = 0;
-
-    const interval = setInterval(async () => {
-      if (!pcRef.current) return;
-      const stats = await pcRef.current.getStats();
-      stats.forEach((report) => {
-        if (report.type === 'outbound-rtp' && report.kind === 'video') {
-          const bytes = (report as RTCOutboundRtpStreamStats).bytesSent ?? 0;
-          const fr = (report as RTCOutboundRtpStreamStats & { framesPerSecond?: number }).framesPerSecond;
-          setKbps(Math.round(((bytes - lastBytes) * 8) / 1000));
-          lastBytes = bytes;
-          if (fr) setFps(Math.round(fr));
-        }
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [status]);
-
-  // ── Socket + WebRTC setup ──────────────────────────────────────────────
+  // ── Connect socket & create room on mount ──────────────────────────────
   useEffect(() => {
     const socket: Socket = io(SERVER_URL, { transports: ['websocket'] });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      // Re-announce as host using stored roomId
+      // Always create a fresh room when host page loads
       socket.emit('create_room');
     });
 
-    // After create_room server emits room_created — we ignore it here
-    // because roomId/token already exist; viewer_joined is what we wait for
+    socket.on('room_created', ({ token }: { roomId: string; token: string }) => {
+      const link = `${window.location.origin}/?page=viewer&token=${token}`;
+      setShareLink(link);
+      setStatus('waiting');
+    });
 
     socket.on('viewer_joined', async () => {
-      setStatus('connected');
-
-      const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
-      pcRef.current = pc;
-
-      // Add tracks from existing stream
-      streamRef.current?.getTracks().forEach((t) =>
-        pc.addTrack(t, streamRef.current!),
-      );
-
-      pc.onicecandidate = ({ candidate }) => {
-        if (candidate) socket.emit('ice_candidate', { candidate });
-      };
-
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-          setStatus('viewer_left');
-        }
-      };
-
-      const offer = await pc.createOffer();
-      let sdp = offer.sdp ?? '';
-      sdp = preferCodec(sdp);
-      await pc.setLocalDescription({ type: 'offer', sdp });
-      socket.emit('offer', { sdp: pc.localDescription });
+      if (!pcRef.current) {
+        // Viewer joined before screen share started — create PC when share starts
+        setStatus('connected');
+        return;
+      }
+      await startOffer(socket);
     });
 
     socket.on('answer', async ({ sdp }: { sdp: RTCSessionDescriptionInit }) => {
@@ -138,11 +109,42 @@ export default function Host({ token }: Props) {
 
     socket.on('viewer_left', () => setStatus('viewer_left'));
 
+    socket.on('connect_error', () => {
+      setError('Не вдалося підключитися до сигнального сервера.');
+      setStatus('error');
+    });
+
     return () => {
       socket.disconnect();
       stopSharing();
     };
   }, [stopSharing]);
+
+  async function startOffer(socket: Socket): Promise<void> {
+    if (!streamRef.current) return;
+
+    const pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+    pcRef.current = pc;
+
+    streamRef.current.getTracks().forEach((t) =>
+      pc.addTrack(t, streamRef.current!),
+    );
+
+    pc.onicecandidate = ({ candidate }) => {
+      if (candidate) socket.emit('ice_candidate', { candidate });
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        setStatus('viewer_left');
+      }
+    };
+
+    const offer = await pc.createOffer();
+    const sdp = preferVP9(offer.sdp ?? '');
+    await pc.setLocalDescription({ type: 'offer', sdp });
+    socket.emit('offer', { sdp: pc.localDescription });
+  }
 
   const handleStartShare = useCallback(async () => {
     try {
@@ -159,13 +161,17 @@ export default function Host({ token }: Props) {
 
       stream.getVideoTracks()[0].onended = stopSharing;
       setSharing(true);
-      setStatus('waiting'); // waiting for viewer
+
+      // If viewer already joined before share started
+      if (status === 'connected') {
+        await startOffer(socketRef.current!);
+      }
     } catch (err) {
       if ((err as { name?: string }).name !== 'NotAllowedError') {
         setError('Не вдалося захопити екран.');
       }
     }
-  }, [stopSharing]);
+  }, [status, stopSharing]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(shareLink).then(() => {
@@ -175,11 +181,11 @@ export default function Host({ token }: Props) {
   }, [shareLink]);
 
   const statusConfig = {
-    waiting:     { label: 'Очікування глядача',  dot: 'bg-amber-400',   text: 'text-amber-400' },
-    sharing:     { label: 'Транслюю',             dot: 'bg-violet-400',  text: 'text-violet-400' },
-    connected:   { label: 'Глядач підключений',  dot: 'bg-emerald-400', text: 'text-emerald-400' },
-    viewer_left: { label: 'Глядач відключився',  dot: 'bg-white/40',    text: 'text-white/40' },
-    error:       { label: 'Помилка',              dot: 'bg-red-400',     text: 'text-red-400' },
+    init:        { label: 'Підключення...',       dot: 'bg-white/30',    text: 'text-white/40' },
+    waiting:     { label: 'Очікування глядача',   dot: 'bg-amber-400',   text: 'text-amber-400' },
+    connected:   { label: 'Глядач підключений',   dot: 'bg-emerald-400', text: 'text-emerald-400' },
+    viewer_left: { label: 'Глядач відключився',   dot: 'bg-white/40',    text: 'text-white/40' },
+    error:       { label: 'Помилка',               dot: 'bg-red-400',     text: 'text-red-400' },
   } as const;
 
   const sc = statusConfig[status];
@@ -197,52 +203,8 @@ export default function Host({ token }: Props) {
           </span>
         </div>
 
-        {/* Preview */}
-        <div className="relative rounded-xl overflow-hidden bg-black border border-white/8 aspect-video">
-          <video
-            ref={videoRef}
-            autoPlay
-            muted
-            playsInline
-            className="w-full h-full object-contain"
-          />
-          {!sharing && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/30">
-              <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="2" y="3" width="20" height="14" rx="2" />
-                <path d="M8 21h8M12 17v4" />
-              </svg>
-              <span className="text-sm">Попередній перегляд з'явиться після початку трансляції</span>
-            </div>
-          )}
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center gap-3 flex-wrap">
-          {!sharing ? (
-            <button
-              onClick={handleStartShare}
-              className="py-2.5 px-5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500
-                text-white font-semibold text-sm cursor-pointer
-                hover:shadow-[0_0_24px_4px_rgba(124,58,237,0.4)] hover:-translate-y-px
-                active:scale-[.97] transition-all duration-200"
-            >
-              ▶ Поділитися екраном
-            </button>
-          ) : (
-            <button
-              onClick={stopSharing}
-              className="py-2.5 px-5 rounded-lg bg-red-600/80 border border-red-500/40
-                text-white font-semibold text-sm cursor-pointer
-                hover:bg-red-600 transition-all duration-200 active:scale-[.97]"
-            >
-              ■ Зупинити
-            </button>
-          )}
-        </div>
-
-        {/* Share link */}
-        {sharing && (
+        {/* Share link — shown immediately after room is created */}
+        {shareLink && (
           <div className="space-y-1.5">
             <p className="text-xs uppercase tracking-widest text-white/30 font-medium">
               Посилання для глядача
@@ -263,14 +225,54 @@ export default function Host({ token }: Props) {
                 }
               </button>
             </div>
+            <p className="text-xs text-white/25">Посилання дійсне поки ця вкладка відкрита.</p>
           </div>
         )}
+
+        {/* Preview */}
+        <div className="relative rounded-xl overflow-hidden bg-black border border-white/8 aspect-video">
+          <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-contain" />
+          {!sharing && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-white/30">
+              <svg className="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <path d="M8 21h8M12 17v4" />
+              </svg>
+              <span className="text-sm">Натисни «Поділитися екраном»</span>
+            </div>
+          )}
+        </div>
+
+        {/* Controls */}
+        <div className="flex items-center gap-3 flex-wrap">
+          {!sharing ? (
+            <button
+              onClick={handleStartShare}
+              disabled={status === 'init'}
+              className="py-2.5 px-5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500
+                text-white font-semibold text-sm cursor-pointer
+                hover:shadow-[0_0_24px_4px_rgba(124,58,237,0.4)] hover:-translate-y-px
+                active:scale-[.97] transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              ▶ Поділитися екраном
+            </button>
+          ) : (
+            <button
+              onClick={stopSharing}
+              className="py-2.5 px-5 rounded-lg bg-red-600/80 border border-red-500/40
+                text-white font-semibold text-sm cursor-pointer
+                hover:bg-red-600 transition-all duration-200 active:scale-[.97]"
+            >
+              ■ Зупинити
+            </button>
+          )}
+        </div>
 
         {/* Stats */}
         {status === 'connected' && (
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: 'FPS',    value: fps ? `${fps}` : '—' },
+              { label: 'FPS',     value: fps  ? `${fps}` : '—' },
               { label: 'Бітрейт', value: kbps ? `${kbps} кбіт/с` : '—' },
             ].map(({ label, value }) => (
               <div key={label} className="bg-white/3 border border-white/8 rounded-lg p-3 text-center">
@@ -285,10 +287,10 @@ export default function Host({ token }: Props) {
         {sharing && (
           <div className="px-3 py-3 bg-emerald-500/8 border border-emerald-500/20 rounded-lg text-emerald-400 text-xs leading-relaxed">
             💡 <strong>Системне аудіо macOS:</strong> Chrome/Edge захоплює аудіо вкладки нативно.
-            Для повного системного звуку встановіть{' '}
-            <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener noreferrer"
-              className="underline">BlackHole</a>{' '}
-            і оберіть його як джерело.
+            Для повного системного звуку встанови{' '}
+            <a href="https://existential.audio/blackhole/" target="_blank" rel="noopener noreferrer" className="underline">
+              BlackHole
+            </a>.
           </div>
         )}
 

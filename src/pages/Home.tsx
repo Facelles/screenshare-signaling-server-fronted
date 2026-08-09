@@ -1,75 +1,15 @@
-import { useState, useCallback } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useCallback, useState } from 'react';
 import { navigate } from '../App.js';
-import { SERVER_URL } from '../config.js';
-
-type Tab = 'host' | 'join';
-
-function CopyIcon() {
-  return (
-    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="9" y="9" width="13" height="13" rx="2" />
-      <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-    </svg>
-  );
-}
-
-function MonitorIcon() {
-  return (
-    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <path d="M8 21h8M12 17v4" />
-    </svg>
-  );
-}
 
 export default function Home() {
-  const [tab, setTab] = useState<Tab>('host');
-
-  // ── HOST state ──────────────────────────────────────────────────────────
-  const [creating, setCreating] = useState(false);
-  const [shareLink, setShareLink] = useState('');
-  const [createdRoom, setCreatedRoom] = useState<{ roomId: string; token: string } | null>(null);
-  const [createError, setCreateError] = useState('');
-  const [copied, setCopied] = useState(false);
-
-  // ── VIEWER state ────────────────────────────────────────────────────────
   const [tokenInput, setTokenInput] = useState('');
   const [joinError, setJoinError] = useState('');
-
-  const handleCreateRoom = useCallback(() => {
-    setCreating(true);
-    setCreateError('');
-
-    const socket: Socket = io(SERVER_URL, { transports: ['websocket'] });
-
-    socket.on('connect', () => socket.emit('create_room'));
-
-    socket.on('room_created', ({ roomId, token }: { roomId: string; token: string }) => {
-      const url = `${window.location.origin}/?page=viewer&token=${token}`;
-      setShareLink(url);
-      setCreatedRoom({ roomId, token });
-      setCreating(false);
-      socket.disconnect(); // host page will open its own socket
-    });
-
-    socket.on('connect_error', () => {
-      setCreateError('Не вдалося підключитись до сервера. Перевірте, чи запущений backend.');
-      setCreating(false);
-    });
-  }, []);
-
-  const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(shareLink).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [shareLink]);
+  const [tab, setTab] = useState<'host' | 'join'>('host');
 
   const handleGoHost = useCallback(() => {
-    if (!createdRoom) return;
-    navigate(`/?page=host&room=${createdRoom.roomId}&token=${createdRoom.token}`);
-  }, [createdRoom]);
+    // Navigate to host page — it will create the room and show the share link
+    navigate('/?page=host');
+  }, []);
 
   const handleJoin = useCallback(() => {
     setJoinError('');
@@ -82,6 +22,11 @@ export default function Home() {
       token = url.searchParams.get('token') ?? raw;
     } catch { /* bare token */ }
 
+    if (!token) {
+      setJoinError('Вставте посилання або токен.');
+      return;
+    }
+
     navigate(`/?page=viewer&token=${token}`);
   }, [tokenInput]);
 
@@ -90,19 +35,21 @@ export default function Home() {
 
       {/* Logo */}
       <div className="flex items-center gap-2 mb-10 text-white/90 font-semibold text-base tracking-tight">
-        <MonitorIcon />
+        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <path d="M8 21h8M12 17v4" />
+        </svg>
         Screen<span className="text-purple-400">Share</span>
       </div>
 
       {/* Card */}
       <div className="glass rounded-2xl p-8 w-full max-w-md page-enter">
-
         <h1 className="text-2xl font-bold tracking-tight mb-1">Приватна трансляція</h1>
         <p className="text-sm text-white/50 mb-6">P2P · WebRTC · Зашифровано · &lt;150 мс</p>
 
         {/* Tabs */}
         <div className="flex gap-1 bg-white/5 rounded-lg p-1 mb-7">
-          {(['host', 'join'] as Tab[]).map((t) => (
+          {(['host', 'join'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -120,61 +67,17 @@ export default function Home() {
         {tab === 'host' && (
           <div className="space-y-4">
             <p className="text-sm text-white/50">
-              Натисни — отримаєш одноразове посилання для глядача.
+              Натисни — відкриється сторінка трансляції, де отримаєш посилання для глядача.
             </p>
-
-            {!createdRoom ? (
-              <button
-                onClick={handleCreateRoom}
-                disabled={creating}
-                className="w-full py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500
-                  text-white font-semibold text-sm cursor-pointer
-                  hover:shadow-[0_0_24px_4px_rgba(124,58,237,0.4)] hover:-translate-y-px
-                  active:scale-[.97] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {creating ? 'Підключення...' : 'Створити кімнату'}
-              </button>
-            ) : (
-              <div className="space-y-3">
-                {/* Link box */}
-                <div className="flex items-center gap-2 px-3 py-2.5
-                  bg-violet-500/10 border border-violet-500/30 rounded-lg">
-                  <span className="flex-1 text-violet-300 text-xs font-mono truncate">
-                    {shareLink}
-                  </span>
-                  <button
-                    onClick={handleCopy}
-                    title="Скопіювати"
-                    className="p-1.5 rounded-md bg-white/5 hover:bg-white/10 text-white/60
-                      hover:text-white transition-colors cursor-pointer"
-                  >
-                    {copied ? (
-                      <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
-                    ) : <CopyIcon />}
-                  </button>
-                </div>
-                <p className="text-xs text-white/30">
-                  Посилання дійсне до закриття вкладки.
-                </p>
-                <button
-                  onClick={handleGoHost}
-                  className="w-full py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500
-                    text-white font-semibold text-sm cursor-pointer
-                    hover:shadow-[0_0_24px_4px_rgba(124,58,237,0.4)] hover:-translate-y-px
-                    active:scale-[.97] transition-all duration-200"
-                >
-                  Відкрити трансляцію →
-                </button>
-              </div>
-            )}
-
-            {createError && (
-              <div className="px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg text-red-400 text-sm">
-                {createError}
-              </div>
-            )}
+            <button
+              onClick={handleGoHost}
+              className="w-full py-2.5 rounded-lg bg-gradient-to-r from-violet-600 to-purple-500
+                text-white font-semibold text-sm cursor-pointer
+                hover:shadow-[0_0_24px_4px_rgba(124,58,237,0.4)] hover:-translate-y-px
+                active:scale-[.97] transition-all duration-200"
+            >
+              Відкрити трансляцію →
+            </button>
           </div>
         )}
 
