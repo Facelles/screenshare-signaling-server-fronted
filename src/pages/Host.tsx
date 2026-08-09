@@ -57,6 +57,11 @@ export default function Host(_props: Props) {
   const [fps, setFps] = useState(0);
   const [kbps, setKbps] = useState(0);
 
+  const shareLinkRef = useRef(shareLink);
+  useEffect(() => { shareLinkRef.current = shareLink; }, [shareLink]);
+
+
+
   // Expose local mic stream to state for volume hook
   const [localMicStream, setLocalMicStream] = useState<MediaStream | null>(null);
   const [isViewerMuted, setIsViewerMuted] = useState(false);
@@ -184,9 +189,16 @@ export default function Host(_props: Props) {
     });
     socketRef.current = socket;
 
-    socket.on('connect', () => socket.emit('create_room'));
+    socket.on('connect', () => {
+      const currentToken = shareLinkRef.current?.split('token=')[1];
+      if (currentToken) {
+        socket.emit('rejoin_room_as_host', { token: currentToken });
+      } else {
+        socket.emit('create_room');
+      }
+    });
 
-    socket.on('room_created', ({ token }: { roomId: string; token: string }) => {
+    socket.on('room_created', ({ token }: { token: string }) => {
       setShareLink(`${window.location.origin}/?page=viewer&token=${token}`);
       setStatus('waiting');
     });
