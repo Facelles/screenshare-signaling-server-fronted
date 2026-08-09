@@ -62,32 +62,47 @@ export default function Host(_props: Props) {
       pipWindow.close();
       return;
     }
-    if (!('documentPictureInPicture' in window)) {
-      alert('Ваш браузер не підтримує Міні-вікно (Document PiP). Оновіть Chrome або Edge.');
-      return;
-    }
-    try {
-      const pipWin = await window.documentPictureInPicture!.requestWindow({ width: 340, height: 280 });
-      [...document.styleSheets].forEach((styleSheet) => {
-        try {
-          const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
-          const style = document.createElement('style');
-          style.textContent = cssRules;
-          pipWin.document.head.appendChild(style);
-        } catch (e) {
-          const link = document.createElement('link');
-          link.rel = 'stylesheet';
-          link.type = styleSheet.type;
-          link.media = styleSheet.media.mediaText;
-          if (styleSheet.href) link.href = styleSheet.href;
-          pipWin.document.head.appendChild(link);
+    
+    // Check if Document PiP is supported (Chrome/Edge)
+    if ('documentPictureInPicture' in window) {
+      try {
+        const pipWin = await window.documentPictureInPicture!.requestWindow({ width: 340, height: 280 });
+        [...document.styleSheets].forEach((styleSheet) => {
+          try {
+            const cssRules = [...styleSheet.cssRules].map((rule) => rule.cssText).join('');
+            const style = document.createElement('style');
+            style.textContent = cssRules;
+            pipWin.document.head.appendChild(style);
+          } catch (e) {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.type = styleSheet.type;
+            link.media = styleSheet.media.mediaText;
+            if (styleSheet.href) link.href = styleSheet.href;
+            pipWin.document.head.appendChild(link);
+          }
+        });
+        pipWin.document.body.className = 'bg-[#09090f] text-white overflow-hidden p-5 flex flex-col gap-4 font-sans';
+        pipWin.addEventListener('pagehide', () => setPipWindow(null));
+        setPipWindow(pipWin);
+      } catch (e) {
+        console.error('Document PiP error:', e);
+      }
+    } 
+    // Fallback to standard Video PiP (Firefox, Safari)
+    else if (document.pictureInPictureEnabled && videoRef.current) {
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        } else {
+          await videoRef.current.requestPictureInPicture();
         }
-      });
-      pipWin.document.body.className = 'bg-[#09090f] text-white overflow-hidden p-5 flex flex-col gap-4 font-sans';
-      pipWin.addEventListener('pagehide', () => setPipWindow(null));
-      setPipWindow(pipWin);
-    } catch (e) {
-      console.error(e);
+      } catch (e) {
+        console.error('Video PiP error:', e);
+      }
+    } 
+    else {
+      alert('Ваш браузер не підтримує жоден з форматів Міні-вікна (PiP).');
     }
   }, [pipWindow]);
 
