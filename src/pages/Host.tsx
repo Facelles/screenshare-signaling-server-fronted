@@ -87,7 +87,7 @@ export default function Host(_props: Props) {
     
     const ctx = audioCtxRef.current;
     gainNodeRef.current = ctx.createGain();
-    gainNodeRef.current.gain.value = isViewerMuted ? 0 : 3.0; // 300% boost!
+    gainNodeRef.current.gain.value = isViewerMuted ? 0 : 1.8; // 180% boost!
     
     sourceNodeRef.current = ctx.createMediaStreamSource(remoteMicStream);
     sourceNodeRef.current.connect(gainNodeRef.current);
@@ -103,7 +103,7 @@ export default function Host(_props: Props) {
   useEffect(() => {
     if (gainNodeRef.current) {
       // Smoothly transition volume to avoid popping sounds
-      gainNodeRef.current.gain.setTargetAtTime(isViewerMuted ? 0 : 3.0, audioCtxRef.current!.currentTime, 0.1);
+      gainNodeRef.current.gain.setTargetAtTime(isViewerMuted ? 0 : 1.8, audioCtxRef.current!.currentTime, 0.1);
     }
   }, [isViewerMuted]);
 
