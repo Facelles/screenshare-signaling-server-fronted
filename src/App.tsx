@@ -35,7 +35,7 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPop);
   }, []);
 
-  if (route.page === 'host')   return <Host roomId={route.roomId} token={route.token} />;
+  if (route.page === 'host')   return <Host token={route.token} />;
   if (route.page === 'viewer') return <Viewer token={route.token} />;
   return <Home />;
 }

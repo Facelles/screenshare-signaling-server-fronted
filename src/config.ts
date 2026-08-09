@@ -1,6 +1,5 @@
 export const SERVER_URL =
-  (import.meta as { env: { VITE_SERVER_URL?: string } }).env.VITE_SERVER_URL ??
-  'http://localhost:3001';
+  import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
 
 export const STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },

@@ -3,7 +3,6 @@ import { io, Socket } from 'socket.io-client';
 import { SERVER_URL, STUN_SERVERS, VIDEO_MAX_BITRATE, VIDEO_START_BITRATE } from '../config.js';
 
 interface Props {
-  roomId: string;
   token: string;
 }
 
@@ -39,7 +38,7 @@ async function applyBitrate(
   await sender.setParameters(params);
 }
 
-export default function Host({ roomId, token }: Props) {
+export default function Host({ token }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const pcRef    = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
