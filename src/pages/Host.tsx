@@ -197,6 +197,7 @@ export default function Host(_props: Props) {
 
       if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.muted = true; }
       stream.getVideoTracks()[0].onended = stopSharing;
+      stream.getVideoTracks()[0].contentHint = 'motion'; // Prioritize framerate for WebRTC
       setSharing(true);
 
       if (viewerJoinedRef.current) await startOffer(socketRef.current!);

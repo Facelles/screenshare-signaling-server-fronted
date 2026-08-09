@@ -8,5 +8,5 @@ export const STUN_SERVERS: RTCIceServer[] = [
 ];
 
 /** Target start bitrate for video sender (bits/s) */
-export const VIDEO_START_BITRATE = 4_000_000;   // 4 Mbps
-export const VIDEO_MAX_BITRATE   = 8_000_000;   // 8 Mbps
+export const VIDEO_START_BITRATE = 6_000_000;   // 6 Mbps
+export const VIDEO_MAX_BITRATE   = 12_000_000;  // 12 Mbps
