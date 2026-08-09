@@ -34,37 +34,39 @@ export const HostHud: React.FC<HostHudProps> = ({
   return (
     <div className="flex flex-col gap-4 w-full">
       {/* Speaking Indicators Overlay */}
-      <div className="flex justify-between items-center bg-white/5 p-3 rounded-2xl border border-white/10 shadow-lg">
-        <div className="flex items-center gap-3">
-          {micOn && (
-            <div className={`flex items-center gap-2 bg-black/40 pr-3 rounded-full border ${isHostSpeaking ? 'border-violet-500' : 'border-transparent'}`}>
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center bg-violet-600 transition-all ${isHostSpeaking ? 'scale-110 shadow-[0_0_15px_rgba(139,92,246,0.6)]' : ''}`}>
-                 <span className="text-[10px] font-bold tracking-wider">ВИ</span>
+      {(micOn || (status === 'connected' && remoteMicStream)) && (
+        <div className="flex justify-between items-center bg-white/5 p-3 rounded-2xl border border-white/10 shadow-lg">
+          <div className="flex items-center gap-3">
+            {micOn && (
+              <div className={`flex items-center gap-2 bg-black/40 pr-3 rounded-full border ${isHostSpeaking ? 'border-violet-500' : 'border-transparent'}`}>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center bg-violet-600 transition-all ${isHostSpeaking ? 'scale-110 shadow-[0_0_15px_rgba(139,92,246,0.6)]' : ''}`}>
+                   <span className="text-[10px] font-bold tracking-wider">ВИ</span>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+            {status === 'connected' && remoteMicStream && (
+              <div className={`flex items-center gap-2 bg-black/40 pr-3 rounded-full border ${isViewerSpeaking ? 'border-blue-500' : 'border-transparent'}`}>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center bg-blue-600 transition-all ${isViewerSpeaking ? 'scale-110 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : ''}`}>
+                   <span className="text-[10px] font-bold tracking-wider">ГЛ</span>
+                </div>
+              </div>
+            )}
+          </div>
+          
+          {/* Mute Viewer */}
           {status === 'connected' && remoteMicStream && (
-            <div className={`flex items-center gap-2 bg-black/40 pr-3 rounded-full border ${isViewerSpeaking ? 'border-blue-500' : 'border-transparent'}`}>
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center bg-blue-600 transition-all ${isViewerSpeaking ? 'scale-110 shadow-[0_0_15px_rgba(59,130,246,0.6)]' : ''}`}>
-                 <span className="text-[10px] font-bold tracking-wider">ГЛ</span>
-              </div>
-            </div>
+             <button onClick={() => setIsViewerMuted(!isViewerMuted)}
+                  title={isViewerMuted ? 'Увімкнути звук глядача' : 'Заглушити глядача'}
+                  className={`p-2 rounded-xl transition-all shadow-md ${isViewerMuted ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white/90'}`}>
+                {isViewerMuted ? (
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
+                  ) : (
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                )}
+             </button>
           )}
         </div>
-        
-        {/* Mute Viewer */}
-        {status === 'connected' && remoteMicStream && (
-           <button onClick={() => setIsViewerMuted(!isViewerMuted)}
-                title={isViewerMuted ? 'Увімкнути звук глядача' : 'Заглушити глядача'}
-                className={`p-2 rounded-xl transition-all shadow-md ${isViewerMuted ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white/90'}`}>
-              {isViewerMuted ? (
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><line x1="23" y1="9" x2="17" y2="15"></line><line x1="17" y1="9" x2="23" y2="15"></line></svg>
-                ) : (
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
-              )}
-           </button>
-        )}
-      </div>
+      )}
 
       {/* Main Controls */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -87,7 +89,7 @@ export const HostHud: React.FC<HostHudProps> = ({
         )}
 
         {/* Mic button */}
-        {status === 'connected' && (
+        {(status === 'connected' || status === 'waiting') && (
           <button onClick={handleToggleMic}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-5 rounded-xl border text-sm font-medium cursor-pointer shadow-lg
               transition-all duration-200 active:scale-95
