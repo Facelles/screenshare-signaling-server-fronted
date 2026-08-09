@@ -41,13 +41,27 @@ export default function Viewer({ token }: Props) {
 
   const [remoteMicStream, setRemoteMicStream] = useState<MediaStream | null>(null);
   const isHostSpeaking = useAudioVolume({ stream: remoteMicStream, threshold: 12 });
-  const [remoteAudioStreams, setRemoteAudioStreams] = useState<MediaStream[]>([]);
+  
+  // Audio Ducking state
+  const videoStreamIdRef = useRef<string | null>(null);
+  const [remoteAudioTracks, setRemoteAudioTracks] = useState<{ track: MediaStreamTrack, streamId: string }[]>([]);
+  const systemAudioRef = useRef<HTMLAudioElement>(null);
+  const hostMicAudioRef = useRef<HTMLAudioElement>(null);
 
   const revealHud = useCallback(() => {
     setShowHud(true);
     if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
     hudTimerRef.current = setTimeout(() => setShowHud(false), 3000);
   }, []);
+
+  // ── Audio Ducking (Приглушення звуку) ──────────────────────────────────
+  useEffect(() => {
+    if (systemAudioRef.current) {
+      const shouldDuck = isHostSpeaking || isViewerSpeaking;
+      // Smoothly adjust volume would be nice, but instant is fine for now
+      systemAudioRef.current.volume = shouldDuck ? 0.15 : 1.0;
+    }
+  }, [isHostSpeaking, isViewerSpeaking]);
 
   // ── Stats ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -103,16 +117,17 @@ export default function Viewer({ token }: Props) {
         pc = new RTCPeerConnection({ iceServers: STUN_SERVERS });
         pcRef.current = pc;
 
-        pc.ontrack = ({ track, streams }) => {
-          if (track.kind === 'video') {
-            if (videoRef.current && streams[0]) {
-              videoRef.current.srcObject = streams[0];
+        pc.ontrack = (event) => {
+          const streamId = event.streams[0]?.id || '';
+          if (event.track.kind === 'video') {
+            videoStreamIdRef.current = streamId;
+            const stream = new MediaStream([event.track]);
+            if (videoRef.current) {
+              videoRef.current.srcObject = stream;
               setStatus('playing');
             }
-          } else if (track.kind === 'audio') {
-            const stream = new MediaStream([track]);
-            setRemoteAudioStreams(prev => [...prev, stream]);
-            setRemoteMicStream(stream); // Keep the last one for speaking indicator
+          } else if (event.track.kind === 'audio') {
+            setRemoteAudioTracks(prev => [...prev, { track: event.track, streamId }]);
           }
         };
 
@@ -125,7 +140,7 @@ export default function Viewer({ token }: Props) {
           if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
             setStatus('host_left');
             setRemoteMicStream(null);
-            setRemoteAudioStreams([]);
+            setRemoteAudioTracks([]);
 
             // Auto-reconnect WebRTC after a short delay
             setTimeout(() => {
@@ -169,6 +184,21 @@ export default function Viewer({ token }: Props) {
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, [token]);
+
+  // Process incoming audio tracks to distinguish System Audio vs Host Mic
+  useEffect(() => {
+    const systemTrack = remoteAudioTracks.find(t => t.streamId === videoStreamIdRef.current)?.track;
+    const micTrack = remoteAudioTracks.find(t => t.streamId !== videoStreamIdRef.current)?.track;
+
+    if (systemTrack && systemAudioRef.current) {
+      systemAudioRef.current.srcObject = new MediaStream([systemTrack]);
+    }
+    if (micTrack && hostMicAudioRef.current) {
+      const micStream = new MediaStream([micTrack]);
+      hostMicAudioRef.current.srcObject = micStream;
+      setRemoteMicStream(micStream);
+    }
+  }, [remoteAudioTracks]);
 
   // ── Mic toggle ────────────────────────────────────────────────────────
   const handleToggleMic = useCallback(async () => {
@@ -268,10 +298,9 @@ export default function Viewer({ token }: Props) {
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden group"
       onMouseMove={revealHud} onClick={revealHud} onTouchStart={revealHud}>
 
-      {/* Render an audio tag for EVERY incoming audio stream (System + Mic) */}
-      {remoteAudioStreams.map((stream, i) => (
-        <audio key={i} autoPlay playsInline ref={el => { if (el) el.srcObject = stream; }} />
-      ))}
+      {/* Audio tags for separate streams to apply ducking */}
+      <audio ref={systemAudioRef} autoPlay playsInline />
+      <audio ref={hostMicAudioRef} autoPlay playsInline />
 
       <video ref={videoRef} id="viewer-video" autoPlay playsInline className="w-full h-full object-contain" />
 
