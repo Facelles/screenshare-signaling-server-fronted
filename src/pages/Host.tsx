@@ -296,9 +296,8 @@ export default function Host(_props: Props) {
     return () => {
       socketRef.current?.disconnect();
       stopSharing();
-      if (pipWindow) pipWindow.close();
     };
-  }, [stopSharing, pipWindow]);
+  }, [stopSharing]);
 
   // ── Screen share ───────────────────────────────────────────────────────
   const handleStartShare = useCallback(async () => {
