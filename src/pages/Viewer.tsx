@@ -21,6 +21,7 @@ export default function Viewer({ token }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const socketRef = useRef<Socket | null>(null);
+  const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const micSenderRef = useRef<RTCRtpSender | null>(null);
 
@@ -122,6 +123,10 @@ export default function Viewer({ token }: Props) {
       };
 
       const pc = createPeerConnection();
+
+      pc.ondatachannel = (event) => {
+        dataChannelRef.current = event.channel;
+      };
 
         pc.ontrack = (event) => {
           const streamId = event.streams[0]?.id || '';
@@ -298,6 +303,21 @@ export default function Viewer({ token }: Props) {
     </div>
   );
 
+  // ── Remote Control ───────────────────────────────────────────────────────
+  const handleRemoteMouseMove = useCallback((e: React.MouseEvent<HTMLVideoElement>) => {
+    if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    dataChannelRef.current.send(JSON.stringify({ action: 'mouse-move', payload: { x, y } }));
+  }, []);
+
+  const handleRemoteMouseClick = useCallback((e: React.MouseEvent<HTMLVideoElement>) => {
+    if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') return;
+    const button = e.button === 2 ? 'right' : 'left';
+    dataChannelRef.current.send(JSON.stringify({ action: 'mouse-click', payload: button }));
+  }, []);
+
   return (
     <div ref={containerRef} className="relative w-full h-screen bg-black overflow-hidden group"
       onMouseMove={revealHud} onClick={revealHud} onTouchStart={revealHud}>
@@ -306,7 +326,16 @@ export default function Viewer({ token }: Props) {
       <audio ref={systemAudioRef} autoPlay playsInline />
       <audio ref={hostMicAudioRef} autoPlay playsInline />
 
-      <video ref={videoRef} id="viewer-video" autoPlay playsInline className="w-full h-full object-contain" />
+      <video 
+        ref={videoRef} 
+        id="viewer-video" 
+        autoPlay 
+        playsInline 
+        className="w-full h-full object-contain" 
+        onMouseMove={handleRemoteMouseMove}
+        onMouseDown={handleRemoteMouseClick}
+        onContextMenu={(e) => e.preventDefault()}
+      />
 
       {(status === 'connecting' || status === 'waiting_offer') && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black/80 backdrop-blur-md z-10 text-white/60">
