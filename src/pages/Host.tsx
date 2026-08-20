@@ -401,18 +401,37 @@ export default function Host(_props: Props) {
           </span>
         </div>
 
-        {/* Share link */}
+        {/* Share link & Code */}
         {shareLink && (
-          <div className="space-y-2">
-            <p className="text-xs uppercase tracking-widest text-white/40 font-semibold">Посилання для глядача</p>
-            <div className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-xl shadow-inner">
-              <span className="flex-1 text-violet-300 text-sm font-mono truncate">{shareLink}</span>
-              <button onClick={handleCopy} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer">
-                {copied
-                  ? <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                  : <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
-                }
-              </button>
+          <div className="space-y-4">
+            <div>
+              <p className="text-xs uppercase tracking-widest text-white/40 font-semibold mb-2">Код для підключення</p>
+              <div className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-xl shadow-inner">
+                <span className="flex-1 text-emerald-400 text-lg font-mono text-center tracking-widest font-bold">{shareLink.split('token=')[1]}</span>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(shareLink.split('token=')[1]).then(() => {
+                    setCopied(true); setTimeout(() => setCopied(false), 2000);
+                  });
+                }} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer">
+                  {copied
+                    ? <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    : <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+                  }
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs uppercase tracking-widest text-white/40 font-semibold mb-2">Або повне посилання</p>
+              <div className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 rounded-xl shadow-inner opacity-75 hover:opacity-100 transition-opacity">
+                <span className="flex-1 text-violet-300 text-sm font-mono truncate">{shareLink}</span>
+                <button onClick={handleCopy} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer">
+                  {copied
+                    ? <svg className="w-4 h-4 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    : <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+                  }
+                </button>
+              </div>
             </div>
           </div>
         )}
